@@ -1,0 +1,7 @@
+{
+  "transactions": [
+    {"date": "2026-03-01", "amount": -5.75, "memo": "Starbucks coffee"},
+    {"date": "2026-03-02", "amount": -42.18, "memo": "Amazon order"},
+    {"date": "2026-03-03", "amount": 4200.00, "memo": "Salary"}
+  ]
+}

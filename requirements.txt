@@ -1,0 +1,26 @@
+# Fin-Flow Agent — Phase 1 dependencies
+# Core data processing
+pandas>=2.2.0
+numpy>=1.26.0
+python-dateutil>=2.9.0
+
+# CSV/Excel/JSON parsing
+openpyxl>=3.1.2
+chardet>=5.2.0
+
+# Validation & schema
+pydantic>=2.6.0
+
+# Testing
+pytest>=8.0.0
+pytest-cov>=5.0.0
+
+# Future phases (commented until needed)
+# google-generativeai>=0.5.0   # Gemini
+# langgraph>=0.0.40
+# chromadb>=0.4.24
+# sentence-transformers>=2.5.0
+# prophet>=1.1.5
+# supabase>=2.4.0
+# streamlit>=1.33.0
+# plotly>=5.20.0
