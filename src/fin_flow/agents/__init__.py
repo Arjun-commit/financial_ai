@@ -1,5 +1,6 @@
-"""Specialized agents — Categorizer, Forecaster, (Advisor in Phase 3)."""
+"""Specialized agents — Categorizer, Forecaster, Advisor."""
 
+from .advisor import AdvisorAgent, AdvisorAnswer
 from .categorizer import (
     CategorizerAgent,
     Categorization,
@@ -8,6 +9,8 @@ from .categorizer import (
 from .forecaster import ForecasterAgent, Forecast
 
 __all__ = [
+    "AdvisorAgent",
+    "AdvisorAnswer",
     "CategorizerAgent",
     "Categorization",
     "TAX_CATEGORIES",
