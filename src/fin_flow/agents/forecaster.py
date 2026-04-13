@@ -1,21 +1,4 @@
-"""Forecaster Agent — daily cash-flow projection and runway ("death date").
-
-This agent takes a normalized transaction DataFrame and computes:
-
-* `daily_net`            — net cashflow per day (income + expenses)
-* `cumulative_balance`   — cumulative cash position over the historical window
-* `mean_daily_burn`      — average daily *negative* cashflow
-* `death_date`           — the date the projected balance hits zero, or None
-                            if the business is cash-flow positive
-* `forecast`             — a DataFrame of (date, projected_balance) for the
-                            next N days
-
-Backends:
-* `LinearBackend` (default) — fits a simple linear trend on cumulative
-  balance and projects forward. Zero dependencies beyond pandas/numpy.
-* `ProphetBackend` (optional) — uses Meta Prophet for seasonal decomposition
-  if `prophet` is importable. Falls back to linear when not.
-"""
+"""Forecaster Agent — daily cash-flow projection and runway."""
 
 from __future__ import annotations
 
@@ -60,7 +43,6 @@ def _to_float(x) -> float:
 
 
 def _build_daily_series(df: pd.DataFrame) -> pd.Series:
-    """Return a Series indexed by date with daily net cashflow."""
     if df.empty:
         return pd.Series(dtype=float)
     work = df[["transaction_date", "amount"]].copy()
@@ -71,7 +53,6 @@ def _build_daily_series(df: pd.DataFrame) -> pd.Series:
         .sum()
         .sort_index()
     )
-    # Reindex to a contiguous date range so projections are smooth
     if not daily.empty:
         full = pd.date_range(daily.index.min(), daily.index.max(), freq="D").date
         daily = daily.reindex(full, fill_value=0.0)
@@ -90,7 +71,6 @@ class LinearBackend:
         if daily.empty:
             return pd.DataFrame(columns=["date", "projected_balance"])
         cum = daily.cumsum() + starting_balance
-        # Use mean daily net as the slope -- simple, robust on noisy data
         slope = float(daily.mean())
         last_date = list(daily.index)[-1]
         last_balance = float(cum.iloc[-1])
@@ -143,8 +123,6 @@ class ProphetBackend:
 
 
 class ForecasterAgent:
-    """Top-level Forecaster agent."""
-
     def __init__(self, prefer_prophet: bool = True) -> None:
         self.linear = LinearBackend()
         self.prophet: Optional[ProphetBackend] = None

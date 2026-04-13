@@ -1,17 +1,4 @@
-"""Text embedding backends.
-
-Default backend is a tiny, dependency-free hashing bag-of-words model that
-produces deterministic, cosine-comparable vectors. It is intentionally
-simple: it tokenizes on word boundaries, lowercases, and hashes each token
-into a fixed-size vector. Cosine similarity between two such vectors
-approximates keyword overlap — good enough for retrieval over a few
-hundred short business notes without pulling in a 400MB model.
-
-If the optional `sentence-transformers` package is available, the
-`SentenceTransformerEmbedder` drop-in replacement uses a real neural
-encoder (default: `all-MiniLM-L6-v2`). The Advisor agent picks whichever
-backend is available, preferring the neural one when present.
-"""
+"""Text embedding backends."""
 
 from __future__ import annotations
 
@@ -29,12 +16,6 @@ def _tokenize(text: str) -> list[str]:
 
 
 class HashingEmbedder:
-    """Deterministic hashing bag-of-words embedder.
-
-    `dim` controls the vector dimensionality. 256 is plenty for small
-    corpora and keeps memory microscopic.
-    """
-
     name = "hashing"
 
     def __init__(self, dim: int = 256) -> None:
@@ -50,7 +31,6 @@ class HashingEmbedder:
         vec = [0.0] * self.dim
         for tok in _tokenize(text):
             vec[self._hash(tok)] += 1.0
-        # L2 normalize so cosine similarity == dot product
         norm = math.sqrt(sum(v * v for v in vec))
         if norm > 0:
             vec = [v / norm for v in vec]
@@ -61,9 +41,6 @@ class HashingEmbedder:
 
 
 class SentenceTransformerEmbedder:
-    """Optional neural embedder. Activates if `sentence_transformers`
-    is importable. Otherwise stays dormant and the agent falls back."""
-
     name = "sentence-transformers"
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:

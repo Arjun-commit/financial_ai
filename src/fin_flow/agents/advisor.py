@@ -1,24 +1,4 @@
-"""Advisor Agent — grounded, retrieval-augmented financial Q&A.
-
-Design principles:
-
-1. **Grounded answers only.** Every financial claim is backed by a list
-   of transaction IDs (and/or note IDs). The agent never asserts a dollar
-   amount without a citation the user can trace.
-
-2. **Deterministic by default, LLM-upgradable.** The default backend is a
-   pattern-matching interpreter that handles three high-value question
-   families — affordability, category-spend, and runway — plus a generic
-   retrieval fallback. If the optional `GEMINI_API_KEY` is set, the agent
-   passes the retrieved context to Gemini 1.5 Flash for a more fluent
-   answer while still returning the original citations.
-
-3. **PII never leaves the process untouched.** Before any text is sent
-   outbound, transaction descriptions are passed through `mask_pii`.
-
-4. **Uses the existing Forecaster and Categorizer.** The Advisor does
-   not re-implement cashflow math; it composes agents.
-"""
+"""Advisor Agent — grounded, retrieval-augmented financial Q&A."""
 
 from __future__ import annotations
 
@@ -59,8 +39,6 @@ class AdvisorAnswer:
             "backend": self.backend,
         }
 
-
-# ---------- utilities ----------
 
 _AMOUNT_RE = re.compile(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
 _AFFORD_RE = re.compile(r"\b(afford|can i (buy|spend|get)|should i (buy|get))\b", re.I)
@@ -120,17 +98,12 @@ def _match_category(question: str) -> Optional[str]:
     return None
 
 
-# ---------- Advisor ----------
-
-
 class AdvisorAgent:
     def __init__(
         self,
         vector_store: Optional[InMemoryVectorStore] = None,
         prefer_llm: bool = True,
     ) -> None:
-        # NOTE: do not use `or` here — InMemoryVectorStore defines __len__
-        # so an empty store is Python-falsy and would be silently replaced.
         self.store = vector_store if vector_store is not None else best_available_store()
         self.forecaster = ForecasterAgent()
         self.prefer_llm = prefer_llm
@@ -154,15 +127,11 @@ class AdvisorAgent:
     def active_backend(self) -> str:
         return "gemini" if self._gemini else "rules"
 
-    # ---- note ingestion ----
-
     def add_note(self, text: str, **metadata) -> str:
         return self.store.add(text, metadata=metadata or None)
 
     def add_notes(self, items: Iterable[dict]) -> list[str]:
         return self.store.add_many(items)
-
-    # ---- core Q&A ----
 
     def ask(
         self,
@@ -192,8 +161,6 @@ class AdvisorAgent:
 
         return result
 
-    # ---- intent routing ----
-
     def _route(self, question: str):
         if _RUNWAY_RE.search(question):
             return "runway", self._answer_runway
@@ -203,15 +170,12 @@ class AdvisorAgent:
             return "category_spend", self._answer_category_spend
         return "general", self._answer_general
 
-    # ---- handlers ----
-
     def _answer_runway(
         self, q: str, df: pd.DataFrame, start: float, notes: list[VectorHit]
     ) -> tuple[str, list[str]]:
         if df.empty:
             return ("No transactions available to compute runway.", [])
         fc = self.forecaster.forecast(df, starting_balance=start, horizon_days=180)
-        # Ground with every transaction used in the window
         cites = _cite_window(df, days=30)
         return (fc.summary(), cites)
 
@@ -229,15 +193,12 @@ class AdvisorAgent:
         cites = _cite_window(win, days=30)
 
         if amount is None:
-            # No price given — advise on discretionary headroom
             verdict = (
                 f"Your last-30-day net cashflow is ${net_30d:,.2f}. "
                 f"Anything meaningfully below that fits within recent headroom."
             )
             return (verdict, cites)
 
-        # Simple rule: affordable if price <= 50% of last-30d net cashflow
-        # and does not push starting balance below one month of burn.
         fc = self.forecaster.forecast(df, starting_balance=start, horizon_days=90)
         burn = fc.mean_daily_burn * 30
         cushion = start - burn
@@ -272,7 +233,6 @@ class AdvisorAgent:
             return ("No transactions in the last 30 days.", [])
 
         if category is None:
-            # Total spend in window
             total = float(sum(_to_float(a) for a in win["amount"] if _to_float(a) < 0))
             cites = _cite_window(win, days=30, only_expenses=True)
             return (
@@ -313,8 +273,6 @@ class AdvisorAgent:
             f"Ask me about spend by category, runway, or affordability.",
             _cite_window(df, days=30),
         )
-
-    # ---- optional Gemini rewrite ----
 
     def _rewrite_with_gemini(self, draft: AdvisorAnswer) -> str:
         assert self._gemini is not None

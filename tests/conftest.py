@@ -1,10 +1,4 @@
-"""Shared pytest configuration.
-
-The sandboxed runtime used for local test execution cannot always delete
-entries created under the system temp directory, which makes pytest's
-default `tmp_path_factory` cleanup explode with PermissionError.
-Anchoring the base temp inside the repo works around that.
-"""
+"""Shared pytest configuration."""
 
 import os
 from pathlib import Path

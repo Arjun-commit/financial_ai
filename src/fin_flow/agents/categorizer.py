@@ -1,18 +1,4 @@
-"""Categorizer Agent — assigns IRS / Schedule-C-aligned tax categories.
-
-Two execution modes:
-
-* `RulesBackend` (default, zero-cost, deterministic) — keyword scoring against
-  a curated lexicon. Runs offline, no API key required, fast enough for
-  hundreds of thousands of rows.
-* `GeminiBackend` (optional) — wraps `google.generativeai` and asks
-  Gemini 1.5 Flash to classify a batch of descriptions when the
-  `GEMINI_API_KEY` env var is present. Falls back to the rules backend
-  automatically when the SDK or key is missing.
-
-Both backends share a `Categorization` result type so the pipeline never
-cares which one ran.
-"""
+"""Categorizer Agent — assigns IRS / Schedule-C-aligned tax categories."""
 
 from __future__ import annotations
 
@@ -26,9 +12,7 @@ import pandas as pd
 
 from ..utils.pii import mask_pii
 
-# IRS Schedule C-style buckets that small businesses and freelancers use.
-# Order is significant: more specific categories should come before broad
-# ones so the rules backend prefers them in the case of a tie.
+# IRS Schedule C-style buckets. Order matters: more specific first.
 TAX_CATEGORIES: tuple[str, ...] = (
     "Income",
     "Payroll",
@@ -50,7 +34,6 @@ TAX_CATEGORIES: tuple[str, ...] = (
     "Uncategorized",
 )
 
-# Lower-cased keyword -> category. Multi-word phrases are matched as-is.
 _KEYWORD_LEXICON: dict[str, str] = {
     # income
     "payroll": "Income",
@@ -171,8 +154,6 @@ class Categorization:
 
 
 class RulesBackend:
-    """Deterministic keyword-scoring categorizer."""
-
     name = "rules"
 
     def __init__(self, lexicon: Optional[dict[str, str]] = None) -> None:
@@ -180,15 +161,12 @@ class RulesBackend:
 
     def classify_one(self, description: str, amount: float) -> Categorization:
         text = (description or "").lower()
-        # Income heuristic: positive amount + income-flavored keyword
         scores: dict[str, float] = {}
         for keyword, category in self.lexicon.items():
             if keyword in text:
-                # Longer keywords are more specific -> higher weight
                 scores[category] = scores.get(category, 0.0) + len(keyword)
 
         if not scores:
-            # Bias positive amounts toward Income when nothing else hits
             if amount > 0:
                 return Categorization("Income", 0.55, "positive amount, no keyword match")
             return Categorization("Uncategorized", 0.30, "no keyword matched")
@@ -200,13 +178,6 @@ class RulesBackend:
 
 
 class GeminiBackend:
-    """Optional Gemini 1.5 Flash backend.
-
-    Activates only when `google.generativeai` is importable AND a
-    `GEMINI_API_KEY` is set in the environment. Otherwise the agent
-    silently falls back to the rules backend.
-    """
-
     name = "gemini"
     _SYSTEM_PROMPT = (
         "You are the Fin-Flow Categorizer. Classify each transaction into "
@@ -246,7 +217,6 @@ class GeminiBackend:
         body = prompt + "\n\nTransactions:\n" + json.dumps(rows)
         resp = self._model.generate_content(body)  # type: ignore[attr-defined]
         text = (resp.text or "").strip()
-        # Strip code fences if Gemini wraps in ```json
         text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
         try:
             parsed = json.loads(text)
@@ -265,8 +235,6 @@ class GeminiBackend:
 
 
 class CategorizerAgent:
-    """Top-level Categorizer. Tries Gemini if available, else rules."""
-
     def __init__(self, prefer_llm: bool = True) -> None:
         self.rules = RulesBackend()
         self.gemini: Optional[GeminiBackend] = None
@@ -288,10 +256,6 @@ class CategorizerAgent:
         return self.rules.classify_one(description, amount)
 
     def classify_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add `category` and `ai_confidence_score` columns in-place-ish.
-
-        Returns a new DataFrame; the original is not mutated.
-        """
         if df.empty:
             return df.copy()
 

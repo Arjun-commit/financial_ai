@@ -1,20 +1,4 @@
-"""Advisor CLI — add business notes and ask grounded questions.
-
-Examples:
-
-    # Add a strategic note to the vector store
-    python -m fin_flow.advisor_cli note \
-        --text "We plan to scale marketing spend by 20% in Q3." \
-        --type strategic_goal --priority high \
-        --store data/processed/notes.json
-
-    # Ask a grounded question using a categorized transactions file
-    python -m fin_flow.advisor_cli ask \
-        --transactions data/processed/transactions_categorized.csv \
-        --starting-balance 8000 \
-        --store data/processed/notes.json \
-        "How much did I spend on Meals in the last 30 days?"
-"""
+"""Advisor CLI — add business notes and ask grounded questions."""
 
 from __future__ import annotations
 

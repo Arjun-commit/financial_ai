@@ -1,10 +1,6 @@
-# Fin-Flow Agent (CFO-AI)
+# Fin-Flow
 
-Autonomous multi-agent AI system that acts as a virtual CFO ingests raw financial data, categorizes expenses, forecasts cash flow, and answers strategic questions.
-
-## Phases 1 + 2 + 3 - Ingestion, Categorization, Forecasting, RAG Advisor (current)
-
-Phase 1 ships the data plumbing: file parsers, canonical schema, deduplication, and PII masking. Phase 2 adds the agentic brain: a tax-aligned Categorizer and a runway Forecaster. Phase 3 adds the RAG layer: a pluggable vector store for business notes plus an Advisor agent that answers strategic questions with citations back to specific transaction IDs. Every phase ships a zero-dependency default backend and an optional upgrade path (Gemini for LLM categorization and rewriting, Prophet for forecasting, sentence-transformers + ChromaDB for vector memory).
+An autonomous financial agent system that ingests bank data, categorizes expenses, forecasts cash flow, and answers strategic questions with citations.
 
 ### Quick start
 
@@ -34,46 +30,29 @@ python -m fin_flow.advisor_cli ask \
 pytest -q
 ```
 
-### Phase 2 deliverables
+## Components
 
-- `CategorizerAgent` - assigns one of 18 IRS Schedule-C-style categories (Income, Rent, Software & Subscriptions, Meals, Travel, Payroll, …). Default backend is a deterministic keyword-scoring engine; if `google-generativeai` is installed and `GEMINI_API_KEY` is set, it transparently switches to Gemini 1.5 Flash and falls back on any error.
-- `ForecasterAgent` - builds a contiguous daily-net series, computes mean burn rate, and projects cash position over a configurable horizon. Returns a `Forecast` with `death_date`, `mean_daily_burn`, and a full projection DataFrame. Default backend is linear; upgrades to Prophet automatically if the `prophet` package is installed.
-- `pipeline.run_pipeline(...)` - Python API and CLI that chains ingest → dedupe → categorize → forecast and writes `transactions_categorized.csv` + `forecast.csv`.
+**Ingestion** — CSV/Excel/JSON parsers with auto-detection of bank export formats, canonical schema, deduplication, and PII masking.
 
-### Phase 3 deliverables
+**Categorizer** — Assigns transactions to 18 IRS Schedule-C categories. Default is rule-based keyword matching; upgrades to Gemini 1.5 Flash if configured.
 
-- `HashingEmbedder` - deterministic, dependency-free bag-of-words embedder that produces cosine-comparable vectors. Drop-in `SentenceTransformerEmbedder` activates if `sentence-transformers` is installed.
-- `InMemoryVectorStore` - tiny persistent vector store (JSON on disk) with upsert, cosine query, and stable content-hash IDs. `ChromaVectorStore` is a drop-in replacement when `chromadb` is available.
-- `AdvisorAgent` - routes questions into four intents (runway, affordability, category spend, general retrieval), composes the Forecaster for cashflow math, and returns an `AdvisorAnswer` whose every financial claim is backed by a list of real transaction IDs. Optional Gemini rewrite preserves the numbers and citations but rephrases for fluency.
-- `fin_flow.advisor_cli` - two subcommands (`note`, `ask`) for adding business context and asking grounded questions from the terminal.
+**Forecaster** — Computes daily cashflow, projects runway, and estimates when cash runs out. Default is linear trend; upgrades to Prophet if installed.
 
-### Grounding guarantee
+**Advisor** — Retrieval-augmented Q&A over transactions. Routes questions (runway, affordability, spend by category) to handlers, composes answers with citations to real transaction IDs. Optional Gemini refinement improves fluency.
 
-Per the spec's QA section, every financial claim the Advisor makes is traceable. `AdvisorAnswer.citations` is a list of `raw_hash` values that exist in the transactions DataFrame passed to `ask(...)`. A dedicated test (`test_advisor.py::test_citations_reference_only_real_transaction_ids`) enforces that no answer can fabricate a transaction ID.
+**Storage** — Pluggable vector embeddings (hashing or sentence-transformers) and persistent note storage (in-memory JSON or ChromaDB).
 
-### Project layout
+## Project structure
 
 ```
 src/fin_flow/
-  ingestion/    # CSV / Excel / JSON parsers, schema normalizer, CLI
-  agents/       # Categorizer, Forecaster, Advisor (grounded RAG)
-  storage/      # embeddings (hashing / sentence-transformers) + vector store (in-memory / Chroma)
-  utils/        # PII masking, logging, hashing
-  pipeline.py   # high-level Phase 1+2 orchestrator (Python API + CLI)
-  advisor_cli.py # Phase 3 CLI: add notes, ask grounded questions
-tests/          # pytest suites
-data/
-  samples/      # example bank exports
-  processed/    # normalized output
-config/         # schema maps per bank
+  ingestion/          # parsers, schema, dedup, CLI
+  agents/             # categorizer, forecaster, advisor
+  storage/            # embeddings, vector stores
+  utils/              # PII masking
+  pipeline.py         # orchestrator
+  advisor_cli.py      # grounded QA CLI
+  dashboard/          # streamlit app
+tests/
+data/samples/         # example exports
 ```
-
-### What Phase 1 delivers
-
-- Robust CSV ingestion that tolerates different bank export formats (Chase, Bank of America, Wells Fargo, generic)
-- A canonical `Transaction` schema (date, amount, description, source, raw_hash)
-- Deduplication via content-hash so re-uploading the same statement is safe
-- PII masking utilities ready for Phase 2's LLM calls
-- A CLI and a Python API, both tested
-
-Remaining phases add the Supabase relational storage layer and the Streamlit dashboard (see the technical spec).

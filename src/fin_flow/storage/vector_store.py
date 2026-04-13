@@ -1,17 +1,4 @@
-"""Vector store for business notes and strategic goals.
-
-Default implementation is an in-memory store backed by the
-`HashingEmbedder`. If `chromadb` is importable, `ChromaVectorStore` drops
-in as a persistent replacement without changing the Advisor agent API.
-
-Note schema stored per entry:
-
-    id       : stable str (hash of content if not provided)
-    text     : the raw note
-    metadata : dict with free-form keys, e.g. {"type": "strategic_goal",
-               "priority": "high"}
-    embedding: vector produced by the active embedder
-"""
+"""Vector store for business notes and strategic goals."""
 
 from __future__ import annotations
 
@@ -46,8 +33,6 @@ def _stable_id(text: str) -> str:
 
 
 class InMemoryVectorStore:
-    """Tiny vector store: list of records, cosine scan on query."""
-
     name = "in-memory"
 
     def __init__(self, embedder=None, persist_path: Optional[str | Path] = None) -> None:
@@ -66,7 +51,6 @@ class InMemoryVectorStore:
         if not text or not text.strip():
             raise ValueError("cannot add empty text to vector store")
         rid = id or _stable_id(text)
-        # Upsert: replace if id already exists
         self.records = [r for r in self.records if r.id != rid]
         vec = self.embedder.embed(text)
         self.records.append(
@@ -112,8 +96,6 @@ class InMemoryVectorStore:
     def __len__(self) -> int:
         return len(self.records)
 
-    # --- persistence helpers (JSON on disk) ---
-
     def _save(self) -> None:
         if not self.persist_path:
             return
@@ -148,9 +130,6 @@ class InMemoryVectorStore:
 
 
 class ChromaVectorStore:
-    """Optional ChromaDB-backed store. Only instantiated if chromadb is
-    importable. Same interface as `InMemoryVectorStore`."""
-
     name = "chroma"
 
     def __init__(
@@ -205,7 +184,6 @@ class ChromaVectorStore:
                 id=i,
                 text=d,
                 metadata=m or {},
-                # chroma returns distance; convert to similarity
                 score=1.0 - float(dist),
             )
             for i, d, m, dist in zip(ids, docs, metas, dists)
@@ -218,7 +196,6 @@ class ChromaVectorStore:
 def best_available_store(
     persist_path: Optional[str | Path] = None,
 ) -> InMemoryVectorStore | ChromaVectorStore:
-    """Pick a persistent Chroma store if possible, else in-memory."""
     try:
         import chromadb  # type: ignore  # noqa: F401
 

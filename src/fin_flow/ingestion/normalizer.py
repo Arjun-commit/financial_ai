@@ -1,9 +1,4 @@
-"""Normalize heterogeneous bank exports into the canonical schema.
-
-Different banks export CSVs with different column names, date formats, and
-sign conventions. This module attempts to auto-detect common layouts and
-produce a clean DataFrame that matches `CANONICAL_COLUMNS`.
-"""
+"""Normalize heterogeneous bank exports into the canonical schema."""
 
 from __future__ import annotations
 
@@ -51,12 +46,6 @@ class IngestionError(ValueError):
 
 
 def _rename_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Map known aliases to canonical names.
-
-    If multiple source columns alias to the same canonical name (e.g. both
-    "Transaction Date" and "Post Date" -> transaction_date), keep only the
-    first match and drop the rest to avoid duplicate-key errors downstream.
-    """
     mapping: dict[str, str] = {}
     taken: set[str] = set()
     drop: list[str] = []
@@ -104,7 +93,6 @@ def _coerce_amount(value) -> Optional[Decimal]:
 
 
 def _merge_debit_credit(df: pd.DataFrame) -> pd.DataFrame:
-    """If a file has separate debit/credit columns, collapse into `amount`."""
     has_debit = "_debit" in df.columns
     has_credit = "_credit" in df.columns
     if not (has_debit or has_credit):
@@ -125,11 +113,6 @@ def _merge_debit_credit(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize_dataframe(df: pd.DataFrame, source: str = "unknown") -> pd.DataFrame:
-    """Convert a raw bank DataFrame into the canonical Fin-Flow schema.
-
-    Returns a DataFrame with exactly `CANONICAL_COLUMNS`. Rows that cannot
-    be parsed (missing date or amount) are dropped.
-    """
     if df.empty:
         return pd.DataFrame(columns=CANONICAL_COLUMNS)
 
@@ -154,14 +137,9 @@ def normalize_dataframe(df: pd.DataFrame, source: str = "unknown") -> pd.DataFra
     out["category"] = None
     out["ai_confidence_score"] = None
 
-    # Drop rows we couldn't parse
     before = len(out)
     out = out.dropna(subset=["transaction_date", "amount", "description"])
     out = out[out["description"] != ""]
-    dropped = before - len(out)
-    if dropped:
-        # Not an error — many bank CSVs contain header/footer summary rows.
-        pass
 
     # Hash the canonical tuple for dedupe
     out["raw_hash"] = out.apply(

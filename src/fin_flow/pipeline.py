@@ -1,14 +1,4 @@
-"""High-level pipeline that wires Phase 1 + Phase 2 together.
-
-Usage from Python:
-    from fin_flow.pipeline import run_pipeline
-    result = run_pipeline(["data/samples/chase_sample.csv"], starting_balance=10_000)
-    print(result["forecast"].summary())
-
-Usage from CLI:
-    python -m fin_flow.pipeline data/samples/chase_sample.csv \
-        --starting-balance 10000 --horizon 60 --out data/processed/
-"""
+"""High-level pipeline that wires Phase 1 + Phase 2 together."""
 
 from __future__ import annotations
 
@@ -30,7 +20,6 @@ def run_pipeline(
     horizon_days: int = 90,
     prefer_llm: bool = True,
 ) -> dict:
-    """Ingest -> Categorize -> Forecast and return everything as a dict."""
     frames: list[pd.DataFrame] = []
     for raw_path in inputs:
         frames.append(load_file(raw_path))

@@ -1,12 +1,4 @@
-"""PII masking for transaction descriptions.
-
-Phase 1 ships with pattern-based masking so that when Phase 2 sends data
-to the Gemini API, obvious account numbers, card numbers, emails, phones,
-SSNs, and long digit runs never leave the local process.
-
-This is not a replacement for a full DLP system, but it raises the bar
-significantly for a zero-dollar stack.
-"""
+"""PII masking for transaction descriptions."""
 
 from __future__ import annotations
 
@@ -42,7 +34,6 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 
 def mask_pii(text: str) -> str:
-    """Return `text` with likely PII replaced by placeholder tokens."""
     if text is None:
         return ""
     s = str(text)
@@ -52,5 +43,4 @@ def mask_pii(text: str) -> str:
 
 
 def mask_series(values: Iterable[str]) -> pd.Series:
-    """Vectorized masking helper for a pandas Series or iterable."""
     return pd.Series([mask_pii(v) for v in values])

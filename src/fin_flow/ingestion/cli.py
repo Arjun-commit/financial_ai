@@ -1,8 +1,4 @@
-"""Command-line entry point for Phase 1 ingestion.
-
-Usage:
-    python -m fin_flow.ingestion.cli INPUT [INPUT ...] --out OUTPUT.csv
-"""
+"""Command-line entry point for Phase 1 ingestion."""
 
 from __future__ import annotations
 

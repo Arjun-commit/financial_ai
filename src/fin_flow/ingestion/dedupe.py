@@ -1,10 +1,4 @@
-"""Content-hash based deduplication.
-
-Re-uploading the same bank statement is a common user mistake. We guard
-against it by hashing the canonical tuple (date, amount, description) and
-dropping duplicates. The hash is also stored so downstream systems can
-cheaply detect overlap between uploads.
-"""
+"""Content-hash based deduplication."""
 
 from __future__ import annotations
 
@@ -41,7 +35,6 @@ def _canon_amount(value: Any) -> str:
 
 
 def content_hash(transaction_date: Any, amount: Any, description: Any) -> str:
-    """Stable SHA-256 hex digest over the canonical tuple."""
     payload = "|".join(
         [
             _canon_date(transaction_date),
@@ -53,10 +46,6 @@ def content_hash(transaction_date: Any, amount: Any, description: Any) -> str:
 
 
 def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows whose `raw_hash` has already been seen.
-
-    Preserves the first occurrence (stable ordering).
-    """
     if df.empty or "raw_hash" not in df.columns:
         return df.reset_index(drop=True)
     return df.drop_duplicates(subset="raw_hash", keep="first").reset_index(drop=True)

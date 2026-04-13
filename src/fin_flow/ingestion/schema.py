@@ -20,12 +20,6 @@ CANONICAL_COLUMNS = [
 
 @dataclass
 class Transaction:
-    """Canonical transaction record.
-
-    `amount` uses Decimal to avoid floating-point drift on money.
-    Positive amounts = income/credit, negative = expense/debit.
-    """
-
     transaction_date: date
     amount: Decimal
     description: str
