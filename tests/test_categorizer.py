@@ -46,3 +46,46 @@ def test_categorizer_handles_empty_dataframe():
     agent = CategorizerAgent(prefer_llm=False)
     out = agent.classify_dataframe(pd.DataFrame())
     assert out.empty
+
+
+# ── data_quality tests ───────────────────────────────────────────────
+
+def test_data_quality_counts_uncategorized_and_low_confidence():
+    df = pd.DataFrame({
+        "category": ["Income", "Uncategorized", "Meals", "Uncategorized"],
+        "ai_confidence_score": [0.9, 0.3, 0.7, 0.4],
+    })
+    dq = CategorizerAgent.data_quality(df)
+    assert dq.total == 4
+    assert dq.uncategorized_count == 2
+    assert dq.uncategorized_pct == 50.0
+    assert dq.needs_review_count == 2  # 0.3 and 0.4 both below 0.6
+
+
+def test_data_quality_empty_dataframe():
+    df = pd.DataFrame(columns=["category", "ai_confidence_score"])
+    dq = CategorizerAgent.data_quality(df)
+    assert dq.total == 0
+    assert dq.uncategorized_pct == 0.0
+    assert dq.needs_review_count == 0
+
+
+def test_data_quality_all_high_confidence():
+    df = pd.DataFrame({
+        "category": ["Income", "Meals", "Travel"],
+        "ai_confidence_score": [0.95, 0.8, 0.75],
+    })
+    dq = CategorizerAgent.data_quality(df)
+    assert dq.needs_review_count == 0
+    assert dq.uncategorized_count == 0
+    assert dq.uncategorized_pct == 0.0
+
+
+def test_data_quality_custom_threshold():
+    df = pd.DataFrame({
+        "category": ["Income", "Meals"],
+        "ai_confidence_score": [0.85, 0.70],
+    })
+    dq = CategorizerAgent.data_quality(df, threshold=0.8)
+    assert dq.needs_review_count == 1  # 0.70 below 0.8
+    assert dq.needs_review_threshold == 0.8

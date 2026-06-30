@@ -30,7 +30,9 @@ COLUMN_ALIASES: dict[str, str] = {
     "debit": "_debit",
     "credit": "_credit",
     "withdrawal": "_debit",
+    "withdrawals": "_debit",
     "deposit": "_credit",
+    "deposits": "_credit",
     # description
     "description": "description",
     "desc": "description",
@@ -38,6 +40,10 @@ COLUMN_ALIASES: dict[str, str] = {
     "details": "description",
     "narration": "description",
     "payee": "description",
+    # columns to ignore (mapped to _drop so they get silently skipped)
+    "balance": "_drop",
+    "running bal.": "_drop",
+    "running balance": "_drop",
 }
 
 
@@ -117,6 +123,7 @@ def normalize_dataframe(df: pd.DataFrame, source: str = "unknown") -> pd.DataFra
         return pd.DataFrame(columns=CANONICAL_COLUMNS)
 
     df = _rename_columns(df)
+    df = df.drop(columns=[c for c in df.columns if c == "_drop"], errors="ignore")
     df = _merge_debit_credit(df)
 
     required = {"transaction_date", "amount", "description"}
@@ -169,6 +176,9 @@ def load_file(path: str | Path, source: Optional[str] = None) -> pd.DataFrame:
         if isinstance(data, dict) and "transactions" in data:
             data = data["transactions"]
         df = pd.DataFrame(data)
+    elif suffix == ".pdf":
+        from .pdf_parser import parse_pdf
+        df = parse_pdf(p)
     else:
         raise IngestionError(f"Unsupported file type: {suffix}")
 

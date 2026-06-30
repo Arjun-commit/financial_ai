@@ -12,5 +12,6 @@ dist/
 .venv/
 venv/
 data/processed/*
+data/samples/* 
 !data/processed/.gitkeep
 .chroma/

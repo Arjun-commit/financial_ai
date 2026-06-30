@@ -20,6 +20,7 @@ class Forecast:
     horizon_days: int
     projection: pd.DataFrame = field(repr=False)
     backend: str = "linear"
+    mean_daily_income: float = 0.0
 
     def summary(self) -> str:
         if self.death_date is None:
@@ -161,6 +162,11 @@ class ForecasterAgent:
         negatives = daily[daily < 0]
         mean_burn = float(-negatives.mean()) if not negatives.empty else 0.0
 
+        all_amounts = df["amount"].map(_to_float)
+        total_pos = float(all_amounts[all_amounts > 0].sum())
+        n_days = len(daily)
+        mean_income = total_pos / n_days if n_days > 0 else 0.0
+
         death_date: Optional[date] = None
         if not projection.empty:
             below = projection[projection["projected_balance"] <= 0]
@@ -175,4 +181,70 @@ class ForecasterAgent:
             horizon_days=horizon_days,
             projection=projection,
             backend=backend.name,
+            mean_daily_income=mean_income,
         )
+
+
+@dataclass
+class PeriodDelta:
+    """Comparison between two equal-length halves of the loaded date range."""
+
+    has_prior: bool
+    transactions_delta: int = 0
+    prior_count: int = 0
+    current_count: int = 0
+    income_delta: float = 0.0
+    income_delta_pct: Optional[float] = None
+    expenses_delta: float = 0.0
+    expenses_delta_pct: Optional[float] = None
+    net_delta: float = 0.0
+
+
+def compute_period_deltas(df: pd.DataFrame, min_days: int = 14) -> PeriodDelta:
+    """Split loaded transactions into two equal halves and compare metrics.
+
+    Returns PeriodDelta with has_prior=False when the date range is
+    shorter than *min_days*, meaning there isn't enough history for
+    a fair comparison.
+    """
+    if df.empty:
+        return PeriodDelta(has_prior=False)
+
+    dates = pd.to_datetime(df["transaction_date"])
+    min_date, max_date = dates.min(), dates.max()
+    span = (max_date - min_date).days
+
+    if span < min_days:
+        return PeriodDelta(has_prior=False)
+
+    midpoint = min_date + pd.Timedelta(days=span // 2)
+    prior_mask = dates < midpoint
+    current_mask = ~prior_mask
+
+    prior, current = df[prior_mask], df[current_mask]
+    if prior.empty or current.empty:
+        return PeriodDelta(has_prior=False)
+
+    def _sums(subset: pd.DataFrame):
+        amounts = subset["amount"].map(_to_float)
+        inc = float(amounts[amounts > 0].sum())
+        exp = float(amounts[amounts < 0].sum())
+        return inc, abs(exp), inc + exp
+
+    p_inc, p_exp, p_net = _sums(prior)
+    c_inc, c_exp, c_net = _sums(current)
+
+    def _pct(cur, prev):
+        return ((cur - prev) / abs(prev)) * 100 if prev else None
+
+    return PeriodDelta(
+        has_prior=True,
+        transactions_delta=len(current) - len(prior),
+        prior_count=len(prior),
+        current_count=len(current),
+        income_delta=c_inc - p_inc,
+        income_delta_pct=_pct(c_inc, p_inc),
+        expenses_delta=c_exp - p_exp,
+        expenses_delta_pct=_pct(c_exp, p_exp),
+        net_delta=c_net - p_net,
+    )
