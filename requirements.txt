@@ -26,8 +26,8 @@ pytest-cov>=5.0.0
 google-genai>=1.0.0
 
 # Optional (activate for production upgrades)
-# langgraph>=0.0.40
-# chromadb>=0.4.24
-# sentence-transformers>=2.5.0
-# prophet>=1.1.5
-# supabase>=2.4.0
+langgraph>=0.0.40
+chromadb>=0.4.24
+sentence-transformers>=2.5.0
+prophet>=1.1.5
+supabase>=2.4.0
