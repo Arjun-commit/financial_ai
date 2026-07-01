@@ -356,4 +356,4 @@ if prompt:
     reply = "\n".join(reply_parts)
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
-        st.markdown(reply)     
+        st.markdown(reply)
