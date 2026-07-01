@@ -84,6 +84,12 @@ _AMOUNT_RE = re.compile(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
 _AFFORD_RE = re.compile(r"\b(afford|can i (buy|spend|get)|should i (buy|get))\b", re.I)
 _SPEND_RE = re.compile(r"\b(spend|spent|spending|cost)\b", re.I)
 _RUNWAY_RE = re.compile(r"\b(runway|cash out|death date|go broke|out of cash)\b", re.I)
+_ADVICE_RE = re.compile(
+    r"\b(advisable|not advisable|advise|recommend|suggestion|tips?|"
+    r"reduce|cut back|cut down|save money|optimize|improve|too much|"
+    r"unnecessary|wasteful|excessive|where.{0,15}(save|cut))\b",
+    re.I,
+)
 
 
 def _parse_amount(text: str) -> Optional[float]:
@@ -149,7 +155,7 @@ class AdvisorAgent:
         self.forecaster = ForecasterAgent()
         self.prefer_llm = prefer_llm
         self._client = None
-        self._model_name = "gemini-2.0-flash-lite"
+        self._model_name = "gemini-2.5-flash-lite"
         if prefer_llm:
             self._init_gemini()
 
@@ -325,13 +331,6 @@ class AdvisorAgent:
             question, transactions, starting_balance, retrieved,
         )
 
-        # Show offline note when Gemini was expected but failed/unavailable
-        if self.prefer_llm:
-            answer_text = (
-                "Showing a quick summary — full AI analysis available on your next question.\n\n"
-                + answer_text
-            )
-
         return AdvisorAnswer(
             question=question,
             answer=answer_text,
@@ -348,6 +347,8 @@ class AdvisorAgent:
             return "runway", self._answer_runway
         if _AFFORD_RE.search(question):
             return "affordability", self._answer_affordability
+        if _ADVICE_RE.search(question):
+            return "advice", self._answer_advice
         if _SPEND_RE.search(question):
             return "category_spend", self._answer_category_spend
         return "general", self._answer_general
@@ -439,6 +440,61 @@ class AdvisorAgent:
             f"{len(subset)} transactions in the last 30 days.",
             cites,
         )
+
+    # Categories where the user typically has discretionary control
+    _DISCRETIONARY = {
+        "Meals", "Entertainment", "Shopping", "Groceries",
+        "Software & Subscriptions", "Advertising", "Travel",
+    }
+
+    def _answer_advice(
+        self, q: str, df: pd.DataFrame, start: float, notes: list[VectorHit]
+    ) -> tuple[str, list[str]]:
+        """Break down spending by category, flag discretionary ones."""
+        if df.empty or "category" not in df.columns:
+            return ("I need categorized transactions to advise on spending.", [])
+
+        win = _window(df, days=30)
+        if win.empty:
+            return ("No transactions in the last 30 days to analyze.", [])
+
+        # Build per-category totals (expenses only, last 30 days)
+        cat_totals: dict[str, float] = {}
+        for _, r in win.iterrows():
+            amt = _to_float(r["amount"])
+            if amt < 0:
+                cat = str(r.get("category", "Uncategorized"))
+                cat_totals[cat] = round(cat_totals.get(cat, 0.0) + abs(amt), 2)
+
+        if not cat_totals:
+            return ("No expenses in the last 30 days.", [])
+
+        sorted_cats = sorted(cat_totals.items(), key=lambda kv: kv[1], reverse=True)
+        total_exp = sum(v for _, v in sorted_cats)
+        cites = _cite_window(win, days=30, only_expenses=True)
+
+        lines = [f"Spending breakdown (last 30 days, ${total_exp:,.2f} total):\n"]
+        for cat, amt in sorted_cats:
+            pct = (amt / total_exp * 100) if total_exp > 0 else 0
+            tag = " [discretionary]" if cat in self._DISCRETIONARY else ""
+            lines.append(f"  {cat}: ${amt:,.2f} ({pct:.0f}%){tag}")
+
+        disc_total = sum(v for c, v in sorted_cats if c in self._DISCRETIONARY)
+        if disc_total > 0:
+            disc_pct = disc_total / total_exp * 100 if total_exp > 0 else 0
+            lines.append(
+                f"\nDiscretionary spending is ${disc_total:,.2f} "
+                f"({disc_pct:.0f}% of total). "
+                f"These categories offer the most flexibility for cuts."
+            )
+        else:
+            lines.append(
+                "\nMost of your spending is in fixed categories "
+                "(Rent, Utilities, Insurance). Reducing these typically "
+                "requires renegotiation or switching providers."
+            )
+
+        return ("\n".join(lines), cites)
 
     def _answer_general(
         self, q: str, df: pd.DataFrame, start: float, notes: list[VectorHit]

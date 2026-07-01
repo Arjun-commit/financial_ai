@@ -43,6 +43,8 @@ if "starting_balance" not in st.session_state:
     st.session_state.starting_balance = 0.0
 if "filter_needs_review" not in st.session_state:
     st.session_state.filter_needs_review = False
+if "fallback_note_shown" not in st.session_state:
+    st.session_state.fallback_note_shown = False
 
 
 def _to_float(x):
@@ -225,7 +227,7 @@ with chart_left:
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
         fig_cat.update_layout(showlegend=False, yaxis=dict(autorange="reversed"), height=400)
-        st.plotly_chart(fig_cat, use_container_width=True)
+        st.plotly_chart(fig_cat, width='stretch')
 
 with chart_right:
     st.subheader("Daily Cashflow")
@@ -241,7 +243,7 @@ with chart_right:
         color_discrete_sequence=["#4C78A8"],
     )
     fig_daily.update_layout(height=400)
-    st.plotly_chart(fig_daily, use_container_width=True)
+    st.plotly_chart(fig_daily, width='stretch')
 
 if fc and not fc.projection.empty:
     st.divider()
@@ -274,7 +276,7 @@ if fc and not fc.projection.empty:
         xaxis_title="Date",
         height=350,
     )
-    st.plotly_chart(fig_fc, use_container_width=True)
+    st.plotly_chart(fig_fc, width='stretch')
     st.caption(fc.summary())
 
 st.divider()
@@ -330,7 +332,19 @@ if prompt:
         starting_balance=starting_balance,
     )
 
-    reply_parts = [answer.answer]
+    # One-time fallback note on the first rules response
+    answer_text = answer.answer
+    if (
+        answer.backend == "rules"
+        and not st.session_state.fallback_note_shown
+    ):
+        answer_text = (
+            "Showing a quick summary — full AI analysis "
+            "available on your next question.\n\n" + answer_text
+        )
+        st.session_state.fallback_note_shown = True
+
+    reply_parts = [answer_text]
     if answer.citations:
         reply_parts.append(f"\n*Grounded on {len(answer.citations)} transaction(s).*")
     if answer.retrieved_notes:
@@ -342,4 +356,4 @@ if prompt:
     reply = "\n".join(reply_parts)
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
-        st.markdown(reply)
+        st.markdown(reply)     

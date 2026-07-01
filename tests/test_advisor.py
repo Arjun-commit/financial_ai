@@ -107,6 +107,44 @@ def test_citations_reference_only_real_transaction_ids():
             assert c in hashes, f"{q!r} produced hallucinated citation {c}"
 
 
+# ── Advice intent tests ──────────────────────────────────────────────────
+
+
+def test_advice_intent_what_is_not_advisable():
+    """'what is not advisable?' routes to advice, not general."""
+    df = _categorized_chase()
+    advisor = _advisor()
+    ans = advisor.ask("What is not advisable in my current spending?", df, starting_balance=5000.0)
+    assert ans.intent == "advice"
+    assert ans.backend == "rules"
+    # Should contain a category breakdown, not the generic cashflow message
+    assert "Ask me about" not in ans.answer
+    assert "$" in ans.answer
+    assert "discretionary" in ans.answer.lower()
+    assert ans.citations
+
+
+def test_advice_intent_reduce_spending():
+    """Questions about reducing spending route to advice handler."""
+    df = _categorized_chase()
+    advisor = _advisor()
+    ans = advisor.ask("Am I spending too much on any category?", df, starting_balance=5000.0)
+    assert ans.intent == "advice"
+    assert "Spending breakdown" in ans.answer
+    assert ans.citations
+
+
+def test_advice_lists_all_expense_categories():
+    """Advice handler lists all expense categories with amounts."""
+    df = _categorized_chase()
+    advisor = _advisor()
+    ans = advisor.ask("What is not advisable?", df, starting_balance=0.0)
+    assert ans.intent == "advice"
+    # Chase sample has Rent, Meals, Groceries, Shopping, Travel, Transfers
+    assert "Rent" in ans.answer
+    assert "1,850" in ans.answer  # rent amount
+
+
 # ── Context payload tests ────────────────────────────────────────────────
 
 
@@ -242,8 +280,8 @@ def test_gemini_multipart_question():
 # ── Fallback behavior tests ─────────────────────────────────────────────
 
 
-def test_fallback_shows_offline_note():
-    """When prefer_llm=True but Gemini unavailable, show offline note."""
+def test_fallback_returns_clean_answer():
+    """Fallback answers have no UI note — the dashboard handles that once."""
     df = _categorized_chase()
     store = InMemoryVectorStore(embedder=HashingEmbedder(dim=128))
     advisor = AdvisorAgent(vector_store=store, prefer_llm=True)
@@ -252,24 +290,23 @@ def test_fallback_shows_offline_note():
     ans = advisor.ask("How much did I spend?", df, starting_balance=0.0)
 
     assert ans.backend == "rules"
-    assert "AI advisor offline" in ans.answer
-    assert "basic summary" in ans.answer
-    # The actual data should still be present
+    # Advisor returns clean data — no UI note prepended
+    assert "Showing a quick summary" not in ans.answer
     assert "$" in ans.answer
 
 
-def test_fallback_no_offline_note_when_llm_not_preferred():
-    """When prefer_llm=False, no offline note even without Gemini."""
+def test_fallback_no_note_when_llm_not_preferred():
+    """When prefer_llm=False, answer is clean rules output."""
     df = _categorized_chase()
     advisor = _advisor()  # prefer_llm=False
     ans = advisor.ask("How much did I spend?", df, starting_balance=0.0)
 
     assert ans.backend == "rules"
-    assert "AI advisor offline" not in ans.answer
+    assert "Showing a quick summary" not in ans.answer
 
 
-def test_gemini_error_falls_back_with_note():
-    """When Gemini errors, fallback runs and offline note appears."""
+def test_gemini_error_falls_back_cleanly():
+    """When Gemini errors, rules produce accurate data without UI note."""
     df = _categorized_chase()
     store = InMemoryVectorStore(embedder=HashingEmbedder(dim=128))
     advisor = AdvisorAgent(vector_store=store, prefer_llm=True)
@@ -281,7 +318,8 @@ def test_gemini_error_falls_back_with_note():
     ans = advisor.ask("How much did I spend on Meals?", df, starting_balance=0.0)
 
     assert ans.backend == "rules"
-    assert "AI advisor offline" in ans.answer
+    # Clean answer — no UI note
+    assert "Showing a quick summary" not in ans.answer
     # Rules handler still produces accurate data
     assert "Meals" in ans.answer
     assert "5.75" in ans.answer
@@ -292,7 +330,7 @@ def test_gemini_error_falls_back_with_note():
 
 
 def test_gemini_empty_response_falls_back():
-    """Empty Gemini response triggers fallback."""
+    """Empty Gemini response triggers fallback with clean answer."""
     df = _categorized_chase()
     advisor = _advisor_with_mock_gemini("")
     advisor.prefer_llm = True
@@ -300,4 +338,4 @@ def test_gemini_empty_response_falls_back():
 
     # Empty response raises RuntimeError, triggers fallback
     assert ans.backend == "rules"
-    assert "AI advisor offline" in ans.answer
+    assert "Showing a quick summary" not in ans.answer

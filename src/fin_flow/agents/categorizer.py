@@ -256,7 +256,7 @@ class GeminiBackend:
         "No markdown fences, no explanation."
     )
 
-    def __init__(self, model_name: str = "gemini-2.0-flash-lite") -> None:
+    def __init__(self, model_name: str = "gemini-2.5-flash-lite") -> None:
         self.model_name = model_name
         self._client = None
         self._init_error: str = ""
