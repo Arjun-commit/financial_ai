@@ -98,7 +98,7 @@ with st.sidebar:
                 st.caption("Categorized with Gemini Flash.")
             else:
                 st.caption(
-                    "Using rule-based categorization — set "
+                    "Using rule-based categorization set "
                     "GEMINI_API_KEY for AI-powered categorization."
                 )
 
