@@ -289,7 +289,8 @@ class GeminiBackend:
         ]
         body = prompt + "\n\nTransactions:\n" + json.dumps(rows)
 
-        # Retry on transient 429s with exponential backoff
+        # Retry on transient errors (429 / 503) with exponential backoff
+        _RETRYABLE = ("429", "503")
         last_err: Optional[Exception] = None
         for attempt in range(_max_retries + 1):
             try:
@@ -300,15 +301,16 @@ class GeminiBackend:
                 break  # success
             except Exception as e:  # noqa: BLE001
                 last_err = e
-                if "429" in str(e) and attempt < _max_retries:
+                err_str = str(e)
+                if any(code in err_str for code in _RETRYABLE) and attempt < _max_retries:
                     wait = 2 ** attempt * 5  # 5s, 10s
                     logger.warning(
-                        "Gemini 429 (attempt %d/%d), retrying in %ds...",
-                        attempt + 1, _max_retries + 1, wait,
+                        "Gemini transient error (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1, _max_retries + 1, wait, e,
                     )
                     time.sleep(wait)
                     continue
-                raise  # non-429 or out of retries
+                raise  # non-retryable or out of retries
 
         text = (resp.text or "").strip()
         text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()

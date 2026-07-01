@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -265,12 +266,15 @@ class AdvisorAgent:
     # tonight, re-upload a statement and try the Ask Fin-Flow chat — the
     # sidebar will show backend="gemini" and answers will be conversational.
 
+    _RETRYABLE = ("429", "503")
+
     def _ask_gemini(
         self,
         question: str,
         df: pd.DataFrame,
         starting_balance: float,
         notes: list[VectorHit],
+        _max_retries: int = 2,
     ) -> tuple[str, list[str]]:
         """Send context + question to Gemini. Returns (answer, citations)."""
         payload = self._build_context_payload(df, starting_balance, notes)
@@ -279,10 +283,26 @@ class AdvisorAgent:
             question=question,
         )
 
-        resp = self._client.models.generate_content(
-            model=self._model_name,
-            contents=prompt,
-        )
+        # Retry on transient errors (429 / 503) with exponential backoff
+        for attempt in range(_max_retries + 1):
+            try:
+                resp = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=prompt,
+                )
+                break  # success
+            except Exception as e:  # noqa: BLE001
+                err_str = str(e)
+                if any(code in err_str for code in self._RETRYABLE) and attempt < _max_retries:
+                    wait = 2 ** attempt * 5  # 5s, 10s
+                    logger.warning(
+                        "Gemini advisor transient error (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1, _max_retries + 1, wait, e,
+                    )
+                    time.sleep(wait)
+                    continue
+                raise  # non-retryable or out of retries
+
         text = (resp.text or "").strip()
 
         if not text:
