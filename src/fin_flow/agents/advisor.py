@@ -72,7 +72,11 @@ _ADVISOR_PROMPT = (
     "- Keep responses concise but thorough (2-4 paragraphs max).\n"
     "- When recommending spending cuts, reference actual category totals.\n"
     "- Do not mention that you received structured data — speak as if you "
-    "know the user's finances directly.\n\n"
+    "know the user's finances directly.\n"
+    "- Write in plain text only. Do not use any markdown formatting — "
+    "no bold (**), no italics (*), no backticks (`), no headings (#), "
+    "no bullet points. Use dollar signs for amounts (e.g. $1,850.00). "
+    "Write category names as plain words.\n\n"
     "Financial Data:\n{context}\n\n"
     "Question: {question}\n\n"
     "Answer:"
@@ -91,6 +95,15 @@ _ADVICE_RE = re.compile(
     r"unnecessary|wasteful|excessive|where.{0,15}(save|cut))\b",
     re.I,
 )
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove markdown formatting so the response renders as clean plain text."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)   # **bold** -> bold
+    text = re.sub(r"\*(.+?)\*", r"\1", text)         # *italic* -> italic
+    text = re.sub(r"`(.+?)`", r"\1", text)            # `code` -> code
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)  # headings
+    return text
 
 
 def _parse_amount(text: str) -> Optional[float]:
@@ -303,7 +316,7 @@ class AdvisorAgent:
                     continue
                 raise  # non-retryable or out of retries
 
-        text = (resp.text or "").strip()
+        text = _strip_markdown((resp.text or "").strip())
 
         if not text:
             raise RuntimeError("Gemini returned empty response")
