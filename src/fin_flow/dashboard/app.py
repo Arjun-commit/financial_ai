@@ -344,16 +344,16 @@ if prompt:
         )
         st.session_state.fallback_note_shown = True
 
-    reply_parts = [answer_text]
+    reply_parts = [answer_text.strip()]
     if answer.citations:
-        reply_parts.append(f"\n*Grounded on {len(answer.citations)} transaction(s).*")
+        reply_parts.append(f"*Grounded on {len(answer.citations)} transaction(s).*")
     if answer.retrieved_notes:
         notes_str = "\n".join(
             f"- {h.text}" for h in answer.retrieved_notes[:3]
         )
-        reply_parts.append(f"\n**Related context:**\n{notes_str}")
+        reply_parts.append(f"**Related context:**\n\n{notes_str}")
 
-    reply = "\n".join(reply_parts)
+    reply = "\n\n".join(reply_parts)
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
         st.markdown(reply)
