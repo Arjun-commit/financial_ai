@@ -15,35 +15,51 @@ from .schema import CANONICAL_COLUMNS
 
 # Lowercased candidate column names -> canonical name
 COLUMN_ALIASES: dict[str, str] = {
-    # date
+    # ── Date ────────────────────────────────────────────────────────────
     "date": "transaction_date",
     "transaction date": "transaction_date",
     "posting date": "transaction_date",
+    "posted date": "transaction_date",       # Capital One
     "post date": "transaction_date",
     "trans date": "transaction_date",
     "transaction_date": "transaction_date",
-    # amount
+    # ── Amount (single-column) ──────────────────────────────────────────
     "amount": "amount",
     "amt": "amount",
     "transaction amount": "amount",
-    # debit / credit split (handled specially below)
+    # ── Debit / credit split (merged into amount below) ─────────────────
     "debit": "_debit",
     "credit": "_credit",
     "withdrawal": "_debit",
     "withdrawals": "_debit",
     "deposit": "_credit",
     "deposits": "_credit",
-    # description
+    # ── Description ─────────────────────────────────────────────────────
     "description": "description",
     "desc": "description",
     "memo": "description",
-    "details": "description",
+    "details": "description",                # Capital One
     "narration": "description",
     "payee": "description",
-    # columns to ignore (mapped to _drop so they get silently skipped)
+    "original description": "description",   # Mint / some aggregators
+    # ── Columns to ignore (mapped to _drop → silently skipped) ──────────
     "balance": "_drop",
     "running bal.": "_drop",
     "running balance": "_drop",
+    "card no.": "_drop",                     # Capital One
+    "card number": "_drop",
+    "category": "_drop",                     # bank-provided categories
+    "type": "_drop",                         # Chase "type" column
+    "check or slip #": "_drop",              # Wells Fargo
+    "reference number": "_drop",             # Citi
+    "member name": "_drop",                  # Amex
+    "account #": "_drop",
+    "extended details": "_drop",             # Amex
+    "appears on your statement as": "_drop", # Amex
+    "address": "_drop",
+    "city/state": "_drop",
+    "zip code": "_drop",
+    "country": "_drop",
 }
 
 
@@ -130,8 +146,12 @@ def normalize_dataframe(df: pd.DataFrame, source: str = "unknown") -> pd.DataFra
     missing = required - set(df.columns)
     if missing:
         raise IngestionError(
-            f"Could not locate required columns {missing}. "
-            f"Found columns: {list(df.columns)}"
+            "We couldn't read this file format. We support CSV exports "
+            "from Chase, Bank of America, Wells Fargo, Citi, Capital One, "
+            "and American Express. Make sure you're uploading the "
+            "transaction export (not a statement PDF). Need help? The "
+            "'Download Activity' or 'Export Transactions' option in your "
+            "bank's website usually gives the right format."
         )
 
     out = pd.DataFrame()
