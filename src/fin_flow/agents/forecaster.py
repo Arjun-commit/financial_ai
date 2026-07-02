@@ -1,4 +1,4 @@
-"""Forecaster Agent — daily cash-flow projection and runway."""
+"""Forecaster Agent - daily cash-flow projection and runway."""
 
 from __future__ import annotations
 

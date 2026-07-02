@@ -263,7 +263,7 @@ def test_gemini_multipart_question():
     advisor = _advisor_with_mock_gemini(
         "You spent $2,019.67 total in the last 30 days. Your largest "
         "category is Rent at $1,850.00. To reduce spending, consider "
-        "reviewing your Groceries ($87.33) and Shopping ($42.18) — "
+        "reviewing your Groceries ($87.33) and Shopping ($42.18) - "
         "those are the areas with the most flexibility."
     )
     ans = advisor.ask(
@@ -281,7 +281,7 @@ def test_gemini_multipart_question():
 
 
 def test_fallback_returns_clean_answer():
-    """Fallback answers have no UI note — the dashboard handles that once."""
+    """Fallback answers have no UI note - the dashboard handles that once."""
     df = _categorized_chase()
     store = InMemoryVectorStore(embedder=HashingEmbedder(dim=128))
     advisor = AdvisorAgent(vector_store=store, prefer_llm=True)
@@ -290,7 +290,7 @@ def test_fallback_returns_clean_answer():
     ans = advisor.ask("How much did I spend?", df, starting_balance=0.0)
 
     assert ans.backend == "rules"
-    # Advisor returns clean data — no UI note prepended
+    # Advisor returns clean data - no UI note prepended
     assert "Showing a quick summary" not in ans.answer
     assert "$" in ans.answer
 
@@ -318,7 +318,7 @@ def test_gemini_error_falls_back_cleanly():
     ans = advisor.ask("How much did I spend on Meals?", df, starting_balance=0.0)
 
     assert ans.backend == "rules"
-    # Clean answer — no UI note
+    # Clean answer - no UI note
     assert "Showing a quick summary" not in ans.answer
     # Rules handler still produces accurate data
     assert "Meals" in ans.answer

@@ -31,7 +31,7 @@ _HEADER_WORDS = {
 
 # Statement period patterns to extract the year
 _PERIOD_RE = re.compile(
-    r"(\w+ \d{1,2},?\s*\d{4})\s*(?:through|to|thru|-|–)\s*(\w+ \d{1,2},?\s*\d{4})",
+    r"(\w+ \d{1,2},?\s*\d{4})\s*(?:through|to|thru|-)\s*(\w+ \d{1,2},?\s*\d{4})",
     re.IGNORECASE,
 )
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
@@ -217,7 +217,7 @@ def _try_line_extraction(pdf) -> Optional[pd.DataFrame]:
                 date_str = _resolve_date(m.group(1), year, period_start, period_end)
                 rest = m.group(2)
             else:
-                # Continuation line — append to previous txn description
+                # Continuation line - append to previous txn description
                 if raw_txns and line.strip():
                     amounts_here = _AMT_RE.findall(line)
                     if not amounts_here:
@@ -247,7 +247,7 @@ def _try_line_extraction(pdf) -> Optional[pd.DataFrame]:
             continue
 
         # First amount is the transaction amount,
-        # second (if present) is the running balance — drop it
+        # second (if present) is the running balance - drop it
         amt_str = t["amounts"][0]
         rows.append({
             "Date": t["date"],

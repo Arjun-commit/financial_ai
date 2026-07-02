@@ -1,4 +1,4 @@
-"""Advisor Agent — grounded, retrieval-augmented financial Q&A.
+"""Advisor Agent - grounded, retrieval-augmented financial Q&A.
 
 Architecture:
   PRIMARY PATH (Gemini available):
@@ -30,6 +30,7 @@ import pandas as pd
 from ..storage import InMemoryVectorStore, VectorHit, best_available_store
 from ..utils.pii import mask_pii
 from .categorizer import TAX_CATEGORIES
+from .comparisons import yoy_comparison
 from .forecaster import ForecasterAgent
 
 logger = logging.getLogger(__name__)
@@ -66,14 +67,14 @@ _ADVISOR_PROMPT = (
     "You are Fin-Flow CFO, a financial advisor for small businesses. "
     "Answer the user's question using ONLY the financial data below.\n\n"
     "Rules:\n"
-    "- Use specific dollar amounts from the data — never invent numbers.\n"
+    "- Use specific dollar amounts from the data - never invent numbers.\n"
     "- Be conversational and address every part of the question.\n"
     "- If the data doesn't fully answer, say so.\n"
     "- Keep responses concise but thorough (2-4 paragraphs max).\n"
     "- When recommending spending cuts, reference actual category totals.\n"
-    "- Do not mention that you received structured data — speak as if you "
+    "- Do not mention that you received structured data - speak as if you "
     "know the user's finances directly.\n"
-    "- Write in plain text only. Do not use any markdown formatting — "
+    "- Write in plain text only. Do not use any markdown formatting - "
     "no bold (**), no italics (*), no backticks (`), no headings (#), "
     "no bullet points. Use dollar signs for amounts (e.g. $1,850.00). "
     "Write category names as plain words.\n\n"
@@ -251,7 +252,7 @@ class AdvisorAgent:
             else 0.0
         )
 
-        return {
+        payload = {
             "summary": {
                 "date_range": (
                     f"{dates.min().date()} to {dates.max().date()}"
@@ -273,10 +274,29 @@ class AdvisorAgent:
             ],
         }
 
+        # Add year-over-year context when multi-year data is available
+        try:
+            yoy = yoy_comparison(df)
+            if yoy.has_prior_year:
+                payload["yoy"] = {
+                    "label": yoy.ytd_label,
+                    "current_year": yoy.current_year,
+                    "prior_year": yoy.prior_year,
+                    "income_delta": yoy.ytd_income_delta,
+                    "income_delta_pct": yoy.ytd_income_delta_pct,
+                    "expenses_delta": yoy.ytd_expenses_delta,
+                    "expenses_delta_pct": yoy.ytd_expenses_delta_pct,
+                    "top_category_changes": yoy.top_category_changes[:3],
+                }
+        except Exception:  # noqa: BLE001
+            pass  # YoY is supplementary - never break the advisor
+
+        return payload
+
     # ── Primary path: Gemini-first ───────────────────────────────────────
     # NOTE: Live Gemini test pending API quota reset. The flow below is
     # verified via mocked unit tests (test_advisor.py).  Once quota resets
-    # tonight, re-upload a statement and try the Ask Fin-Flow chat — the
+    # tonight, re-upload a statement and try the Ask Fin-Flow chat - the
     # sidebar will show backend="gemini" and answers will be conversational.
 
     _RETRYABLE = ("429", "503")

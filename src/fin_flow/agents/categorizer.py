@@ -1,4 +1,4 @@
-"""Categorizer Agent — assigns IRS / Schedule-C-aligned tax categories."""
+"""Categorizer Agent - assigns IRS / Schedule-C-aligned tax categories."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ TAX_CATEGORIES: tuple[str, ...] = (
     "Advertising",
     "Professional Services",
     "Insurance",
+    "Repairs & Maintenance",
     "Taxes & Fees",
     "Bank Fees",
     "Groceries",
@@ -120,6 +121,16 @@ _KEYWORD_LEXICON: dict[str, str] = {
     "irs": "Taxes & Fees",
     "tax payment": "Taxes & Fees",
     "franchise tax": "Taxes & Fees",
+    # repairs & maintenance
+    "repair": "Repairs & Maintenance",
+    "maintenance": "Repairs & Maintenance",
+    "plumber": "Repairs & Maintenance",
+    "electrician": "Repairs & Maintenance",
+    "hvac": "Repairs & Maintenance",
+    "handyman": "Repairs & Maintenance",
+    "home depot": "Repairs & Maintenance",
+    "lowes": "Repairs & Maintenance",
+    "lowe's": "Repairs & Maintenance",
     # bank fees
     "service fee": "Bank Fees",
     "overdraft": "Bank Fees",
@@ -244,6 +255,7 @@ class GeminiBackend:
         "- Mobile plans, streaming, SaaS are Software & Subscriptions.\n"
         "- Rent payments (Bilt, lease) are Rent.\n"
         "- Grocery/pharmacy chains (Fry's, Safeway, Kroger, CVS) are Groceries.\n"
+        "- Repairs, maintenance, plumbing, HVAC, handyman services are Repairs & Maintenance.\n"
         "- Only use Uncategorized if you truly cannot determine the type.\n\n"
         "Examples of messy real bank descriptions and their categories:\n"
         '- "Frys Food And Drug 64 Tucson AZ" -> Groceries\n'
@@ -276,12 +288,15 @@ class GeminiBackend:
     def available(self) -> bool:
         return self._client is not None
 
-    def classify_batch(
-        self, descriptions: list[str], amounts: list[float],
+    _CHUNK_SIZE = 150
+
+    def _classify_chunk(
+        self,
+        descriptions: list[str],
+        amounts: list[float],
         _max_retries: int = 2,
     ) -> list[Categorization]:
-        if not self.available:
-            raise RuntimeError(f"GeminiBackend not available: {self._init_error}")
+        """Classify a single chunk (up to _CHUNK_SIZE transactions)."""
         prompt = self._SYSTEM_PROMPT.format(categories=", ".join(TAX_CATEGORIES))
         rows = [
             {"index": i, "description": mask_pii(d), "amount": float(a)}
@@ -291,7 +306,6 @@ class GeminiBackend:
 
         # Retry on transient errors (429 / 503) with exponential backoff
         _RETRYABLE = ("429", "503")
-        last_err: Optional[Exception] = None
         for attempt in range(_max_retries + 1):
             try:
                 resp = self._client.models.generate_content(
@@ -300,7 +314,6 @@ class GeminiBackend:
                 )
                 break  # success
             except Exception as e:  # noqa: BLE001
-                last_err = e
                 err_str = str(e)
                 if any(code in err_str for code in _RETRYABLE) and attempt < _max_retries:
                     wait = 2 ** attempt * 5  # 5s, 10s
@@ -329,6 +342,59 @@ class GeminiBackend:
                 out[idx] = Categorization(cat, conf, "gemini")
         return out
 
+    def classify_batch(
+        self,
+        descriptions: list[str],
+        amounts: list[float],
+        _max_retries: int = 2,
+        progress_callback=None,
+    ) -> list[Categorization]:
+        """Classify transactions in chunks of _CHUNK_SIZE.
+
+        Per-chunk fallback: if a chunk fails, that chunk falls back to
+        rules while other chunks can still use Gemini.
+
+        Args:
+            progress_callback: optional callable(done_chunks, total_chunks)
+        """
+        if not self.available:
+            raise RuntimeError(f"GeminiBackend not available: {self._init_error}")
+
+        n = len(descriptions)
+        total_chunks = (n + self._CHUNK_SIZE - 1) // self._CHUNK_SIZE
+        all_results: list[Categorization] = []
+        rules = RulesBackend()
+
+        for chunk_idx in range(total_chunks):
+            start = chunk_idx * self._CHUNK_SIZE
+            end = min(start + self._CHUNK_SIZE, n)
+            chunk_descs = descriptions[start:end]
+            chunk_amts = amounts[start:end]
+
+            try:
+                chunk_results = self._classify_chunk(
+                    chunk_descs, chunk_amts, _max_retries=_max_retries,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Gemini chunk %d/%d failed, falling back to rules: %s",
+                    chunk_idx + 1, total_chunks, e,
+                )
+                chunk_results = [
+                    rules.classify_one(d, a)
+                    for d, a in zip(chunk_descs, chunk_amts)
+                ]
+
+            all_results.extend(chunk_results)
+
+            if progress_callback is not None:
+                try:
+                    progress_callback(chunk_idx + 1, total_chunks)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        return all_results
+
 
 class CategorizerAgent:
     def __init__(self, prefer_llm: bool = True) -> None:
@@ -352,33 +418,78 @@ class CategorizerAgent:
                 logger.error("Gemini classify() failed, falling back to rules: %s", e)
         return self.rules.classify_one(description, amount)
 
-    def classify_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+    def classify_dataframe(
+        self,
+        df: pd.DataFrame,
+        cache: Optional[dict] = None,
+        progress_callback=None,
+    ) -> pd.DataFrame:
+        """Classify all transactions in a DataFrame.
+
+        Args:
+            df: transactions with 'description' and 'amount' columns.
+            cache: optional dict mapping raw_hash -> (category, confidence).
+                   Already-cached rows skip classification. New results are
+                   written back into this dict.
+            progress_callback: optional callable(done_chunks, total_chunks)
+                   forwarded to GeminiBackend.classify_batch.
+        """
         if df.empty:
             return df.copy()
 
         out = df.copy()
-        cats: list[str] = []
-        confs: list[float] = []
 
-        if self.gemini:
-            try:
-                results = self.gemini.classify_batch(
-                    out["description"].astype(str).tolist(),
-                    [float(a) for a in out["amount"]],
-                )
-                cats = [r.category for r in results]
-                confs = [r.confidence for r in results]
-                self.last_backend_used = "gemini"
-            except Exception as e:  # noqa: BLE001
-                logger.error("Gemini batch classification failed, falling back to rules: %s", e)
-                cats, confs = [], []
+        # Separate cached vs uncached rows
+        cached_mask = pd.Series([False] * len(out), index=out.index)
+        if cache and "raw_hash" in out.columns:
+            cached_mask = out["raw_hash"].isin(cache)
 
-        if not cats:
-            self.last_backend_used = "rules"
-            for desc, amt in zip(out["description"], out["amount"]):
-                r = self.rules.classify_one(str(desc), float(amt))
-                cats.append(r.category)
-                confs.append(r.confidence)
+        uncached = out[~cached_mask]
+        cats: list[str] = [""] * len(out)
+        confs: list[float] = [0.0] * len(out)
+
+        # Fill in cached rows
+        if cache and "raw_hash" in out.columns:
+            for idx in out.index[cached_mask]:
+                h = out.at[idx, "raw_hash"]
+                cats[out.index.get_loc(idx)] = cache[h][0]
+                confs[out.index.get_loc(idx)] = cache[h][1]
+
+        # Classify uncached rows
+        if not uncached.empty:
+            uncached_descs = uncached["description"].astype(str).tolist()
+            uncached_amts = [float(a) for a in uncached["amount"]]
+            uncached_results: list[Categorization] = []
+
+            if self.gemini:
+                try:
+                    uncached_results = self.gemini.classify_batch(
+                        uncached_descs,
+                        uncached_amts,
+                        progress_callback=progress_callback,
+                    )
+                    self.last_backend_used = "gemini"
+                except Exception as e:  # noqa: BLE001
+                    logger.error("Gemini batch classification failed, falling back to rules: %s", e)
+
+            if not uncached_results:
+                self.last_backend_used = "rules"
+                uncached_results = [
+                    self.rules.classify_one(str(d), float(a))
+                    for d, a in zip(uncached_descs, uncached_amts)
+                ]
+
+            # Place uncached results at correct positions
+            for i, orig_idx in enumerate(uncached.index):
+                pos = out.index.get_loc(orig_idx)
+                cats[pos] = uncached_results[i].category
+                confs[pos] = uncached_results[i].confidence
+
+            # Update cache with new results
+            if cache is not None and "raw_hash" in out.columns:
+                for i, orig_idx in enumerate(uncached.index):
+                    h = out.at[orig_idx, "raw_hash"]
+                    cache[h] = (uncached_results[i].category, uncached_results[i].confidence)
 
         out["category"] = cats
         out["ai_confidence_score"] = confs

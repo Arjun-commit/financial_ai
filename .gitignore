@@ -12,6 +12,7 @@ dist/
 .venv/
 venv/
 data/processed/*
-data/samples/* 
+data/samples/*
 !data/processed/.gitkeep
+data/email_subscribers.json
 .chroma/

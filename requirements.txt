@@ -22,6 +22,12 @@ plotly>=5.20.0
 pytest>=8.0.0
 pytest-cov>=5.0.0
 
+# PDF report generation
+fpdf2>=2.7.0
+
+# Email capture / HTTP
+requests>=2.31.0
+
 # LLM categorization
 google-genai>=1.0.0
 

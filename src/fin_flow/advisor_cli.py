@@ -1,4 +1,4 @@
-"""Advisor CLI — add business notes and ask grounded questions."""
+"""Advisor CLI - add business notes and ask grounded questions."""
 
 from __future__ import annotations
 

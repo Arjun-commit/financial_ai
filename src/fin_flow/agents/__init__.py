@@ -1,4 +1,4 @@
-"""Specialized agents — Categorizer, Forecaster, Advisor."""
+"""Specialized agents - Categorizer, Forecaster, Advisor, Comparisons."""
 
 from .advisor import AdvisorAgent, AdvisorAnswer
 from .categorizer import (
@@ -7,6 +7,7 @@ from .categorizer import (
     DataQuality,
     TAX_CATEGORIES,
 )
+from .comparisons import YoYComparison, monthly_summary, yoy_comparison
 from .forecaster import ForecasterAgent, Forecast, PeriodDelta, compute_period_deltas
 
 __all__ = [
@@ -20,4 +21,7 @@ __all__ = [
     "Forecast",
     "PeriodDelta",
     "compute_period_deltas",
+    "YoYComparison",
+    "monthly_summary",
+    "yoy_comparison",
 ]

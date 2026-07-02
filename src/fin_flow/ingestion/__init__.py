@@ -1,4 +1,4 @@
-"""Ingestion layer — file parsers, normalizers, deduplication."""
+"""Ingestion layer - file parsers, normalizers, deduplication."""
 
 from .schema import Transaction, CANONICAL_COLUMNS
 from .normalizer import normalize_dataframe, load_file

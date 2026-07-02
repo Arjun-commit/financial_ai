@@ -1,5 +1,7 @@
 """Fin-Flow CFO Dashboard"""
 
+import io
+import os
 import sys
 from pathlib import Path
 
@@ -18,11 +20,16 @@ if str(_ROOT) not in sys.path:
 
 from fin_flow.agents import (
     AdvisorAgent, CategorizerAgent, ForecasterAgent,
-    compute_period_deltas,
+    compute_period_deltas, monthly_summary, yoy_comparison,
 )
 from fin_flow.ingestion import deduplicate, load_file
 from fin_flow.ingestion.normalizer import IngestionError
+from fin_flow.reports.tax_report import (
+    build_tax_report, tax_report_to_csv_rows, generate_tax_pdf,
+    TAX_DISCLAIMER, SCHEDULE_C_MAPPING,
+)
 from fin_flow.storage import InMemoryVectorStore, HashingEmbedder
+from fin_flow.utils.analytics import log_event, submit_email, save_email_locally
 
 st.set_page_config(
     page_title="Fin-Flow CFO",
@@ -45,6 +52,11 @@ if "filter_needs_review" not in st.session_state:
     st.session_state.filter_needs_review = False
 if "fallback_note_shown" not in st.session_state:
     st.session_state.fallback_note_shown = False
+if "category_cache" not in st.session_state:
+    st.session_state.category_cache = {}  # raw_hash -> (category, confidence)
+if "session_logged" not in st.session_state:
+    log_event("session_start")
+    st.session_state.session_logged = True
 
 
 def _to_float(x):
@@ -72,7 +84,10 @@ with st.sidebar:
             if sample_path.exists():
                 sample_df = load_file(sample_path, source="chase_sample.csv")
                 cat = CategorizerAgent(prefer_llm=True)
-                classified = cat.classify_dataframe(sample_df)
+                classified = cat.classify_dataframe(
+                    sample_df,
+                    cache=st.session_state.category_cache,
+                )
                 st.session_state.transactions = classified
                 fc_agent = ForecasterAgent(prefer_prophet=False)
                 st.session_state.forecast = fc_agent.forecast(
@@ -80,6 +95,7 @@ with st.sidebar:
                     starting_balance=st.session_state.starting_balance,
                     horizon_days=90,
                 )
+                log_event("sample_data_used")
                 st.rerun()
 
     starting_balance = st.number_input(
@@ -107,7 +123,20 @@ with st.sidebar:
         if frames:
             raw = deduplicate(pd.concat(frames, ignore_index=True))
             cat = CategorizerAgent(prefer_llm=True)
-            df = cat.classify_dataframe(raw)
+            _progress_bar = st.progress(0, text="Categorizing transactions...")
+
+            def _on_progress(done, total):
+                _progress_bar.progress(
+                    done / total,
+                    text=f"Categorizing transactions ({done}/{total} chunks)...",
+                )
+
+            df = cat.classify_dataframe(
+                raw,
+                cache=st.session_state.category_cache,
+                progress_callback=_on_progress,
+            )
+            _progress_bar.empty()
             st.session_state.transactions = df
 
             fc_agent = ForecasterAgent(prefer_prophet=False)
@@ -116,6 +145,7 @@ with st.sidebar:
                 starting_balance=starting_balance,
                 horizon_days=horizon,
             )
+            log_event("file_uploaded", row_count=len(df))
             st.success(f"Loaded {len(df)} transactions from {len(uploaded)} file(s).")
             if cat.last_backend_used == "gemini":
                 st.caption("Categorized with Gemini Flash.")
@@ -124,6 +154,28 @@ with st.sidebar:
                     "Using rule-based categorization set "
                     "GEMINI_API_KEY for AI-powered categorization."
                 )
+
+    # ── Email capture ──────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Stay Updated")
+    _formspree = os.environ.get("FORMSPREE_ENDPOINT")
+    _email_input = st.text_input(
+        "Get tips and product updates",
+        placeholder="you@company.com",
+        key="email_input",
+    )
+    if st.button("Subscribe", key="email_btn") and _email_input.strip():
+        if _formspree:
+            if submit_email(_email_input.strip(), _formspree):
+                st.success("Subscribed!")
+            else:
+                st.error("Could not subscribe, please try again.")
+        else:
+            _local_path = str(_ROOT / "data" / "email_subscribers.json")
+            if save_email_locally(_email_input.strip(), _local_path):
+                st.success("Thanks! We'll keep you posted.")
+            else:
+                st.error("Could not save, please try again.")
 
     st.divider()
     st.subheader("Business Context")
@@ -300,6 +352,197 @@ if fc and not fc.projection.empty:
     st.plotly_chart(fig_fc, width='stretch')
     st.caption(fc.summary())
 
+# ── 4. Monthly Trends ───────────────────────────────────────────────────
+_monthly = monthly_summary(df)
+if len(_monthly) >= 3:
+    st.divider()
+    st.subheader("Monthly Trends")
+    _monthly["month_label"] = _monthly.apply(
+        lambda r: f"{int(r['year'])}-{int(r['month']):02d}", axis=1
+    )
+    fig_monthly = go.Figure()
+    fig_monthly.add_trace(go.Bar(
+        x=_monthly["month_label"], y=_monthly["income"],
+        name="Income", marker_color="#66BB6A",
+    ))
+    fig_monthly.add_trace(go.Bar(
+        x=_monthly["month_label"], y=_monthly["expenses"],
+        name="Expenses", marker_color="#EF5350",
+    ))
+    fig_monthly.update_layout(
+        barmode="group", height=350,
+        yaxis_title="Amount ($)", xaxis_title="Month",
+    )
+    st.plotly_chart(fig_monthly, width='stretch')
+
+# ── 5. Year-over-Year Comparison ────────────────────────────────────────
+_yoy = yoy_comparison(df)
+if _yoy.has_prior_year:
+    st.divider()
+    st.subheader(f"Year-over-Year: {_yoy.prior_year} vs {_yoy.current_year}")
+    log_event("yoy_viewed")
+
+    yc1, yc2, yc3, yc4 = st.columns(4)
+    yc1.metric(
+        f"Income ({_yoy.ytd_label})",
+        f"${_yoy.ytd_current_income:,.2f}",
+        delta=f"{_yoy.ytd_income_delta_pct:+.1f}%" if _yoy.ytd_income_delta_pct is not None else f"${_yoy.ytd_income_delta:+,.0f}",
+    )
+    yc2.metric(
+        f"Expenses ({_yoy.ytd_label})",
+        f"${_yoy.ytd_current_expenses:,.2f}",
+        delta=f"{_yoy.ytd_expenses_delta_pct:+.1f}%" if _yoy.ytd_expenses_delta_pct is not None else f"${_yoy.ytd_expenses_delta:+,.0f}",
+        delta_color="inverse",
+    )
+
+    # Monthly income comparison chart
+    if not _yoy.monthly.empty:
+        _ym = _yoy.monthly
+        fig_yoy = go.Figure()
+        fig_yoy.add_trace(go.Bar(
+            x=_ym["month_name"], y=_ym["prior_expenses"],
+            name=str(_yoy.prior_year), marker_color="#90CAF9",
+        ))
+        fig_yoy.add_trace(go.Bar(
+            x=_ym["month_name"], y=_ym["current_expenses"],
+            name=str(_yoy.current_year), marker_color="#1565C0",
+        ))
+        fig_yoy.update_layout(
+            barmode="group", height=300,
+            yaxis_title="Expenses ($)", xaxis_title="Month",
+        )
+        st.plotly_chart(fig_yoy, width='stretch')
+
+    # Top category changes
+    if _yoy.top_category_changes:
+        st.caption("Largest category changes (expenses):")
+        _change_rows = []
+        for ch in _yoy.top_category_changes:
+            pct_str = f"{ch['delta_pct']:+.1f}%" if ch["delta_pct"] is not None else "N/A"
+            _change_rows.append({
+                "Category": ch["category"],
+                f"{_yoy.prior_year}": f"${ch['prior_amount']:,.2f}",
+                f"{_yoy.current_year}": f"${ch['current_amount']:,.2f}",
+                "Change": f"${ch['delta']:+,.2f} ({pct_str})",
+            })
+        st.dataframe(
+            pd.DataFrame(_change_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+# ── 6. Tax-Ready Report ────────────────────────────────────────────────
+st.divider()
+with st.expander("Tax-Ready Report (Schedule C)", expanded=False):
+    _years = sorted(pd.to_datetime(df["transaction_date"]).dt.year.unique(), reverse=True)
+    if _years:
+        _tax_year = st.selectbox("Tax year", _years, key="tax_year_select")
+        _tax_report = build_tax_report(df, _tax_year)
+
+        if _tax_report.transaction_count > 0:
+            st.caption(f"{_tax_report.transaction_count} transactions in {_tax_year}")
+            st.metric("Business Income", f"${_tax_report.income_total:,.2f}")
+
+            # Expense lines table
+            if _tax_report.expense_lines:
+                st.subheader("Deductible Expenses")
+                _exp_display = []
+                for line in _tax_report.expense_lines:
+                    row = {
+                        "Category": line["category"],
+                        "Schedule C": line["schedule_c_line"],
+                        "Amount": f"${line['amount']:,.2f}",
+                    }
+                    if line["note"]:
+                        row["Note"] = line["note"]
+                    _exp_display.append(row)
+                st.dataframe(
+                    pd.DataFrame(_exp_display),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.metric("Total Deductible", f"${_tax_report.expense_total:,.2f}")
+
+            # Excluded table
+            if _tax_report.excluded:
+                st.subheader("Excluded from Schedule C")
+                _excl_display = [{
+                    "Category": e["category"],
+                    "Amount": f"${e['amount']:,.2f}",
+                    "Reason": e["reason"],
+                } for e in _tax_report.excluded]
+                st.dataframe(
+                    pd.DataFrame(_excl_display),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.caption(TAX_DISCLAIMER)
+
+            # Downloads — payment gating
+            _stripe_link = os.environ.get("STRIPE_PAYMENT_LINK")
+            _paid = st.query_params.get("paid") == "1"
+
+            if _stripe_link and not _paid:
+                st.info("Download your full tax report package:")
+                st.link_button(
+                    "Unlock Downloads ($29)",
+                    _stripe_link,
+                    use_container_width=True,
+                )
+            else:
+                _dl1, _dl2 = st.columns(2)
+                with _dl1:
+                    _csv_rows = tax_report_to_csv_rows(_tax_report, df)
+                    _csv_df = pd.DataFrame(_csv_rows)
+                    _csv_bytes = _csv_df.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "Download CSV",
+                        data=_csv_bytes,
+                        file_name=f"fin_flow_tax_{_tax_year}.csv",
+                        mime="text/csv",
+                        key="tax_csv_dl",
+                        on_click=lambda: log_event("tax_download_clicked", format="csv"),
+                    )
+                with _dl2:
+                    try:
+                        _pdf_bytes = generate_tax_pdf(_tax_report)
+                        st.download_button(
+                            "Download PDF",
+                            data=_pdf_bytes,
+                            file_name=f"fin_flow_tax_{_tax_year}.pdf",
+                            mime="application/pdf",
+                            key="tax_pdf_dl",
+                            on_click=lambda: log_event("tax_download_clicked", format="pdf"),
+                        )
+                    except Exception:
+                        st.caption("PDF generation requires fpdf2. Install with: pip install fpdf2")
+
+            log_event("tax_report_generated", year=_tax_year)
+
+            # Email capture after tax report
+            st.divider()
+            _tax_email = st.text_input(
+                "Get a monthly summary of features and tips",
+                placeholder="you@company.com",
+                key="tax_email_input",
+            )
+            if st.button("Subscribe", key="tax_email_btn") and _tax_email.strip():
+                _fs = os.environ.get("FORMSPREE_ENDPOINT")
+                if _fs:
+                    if submit_email(_tax_email.strip(), _fs):
+                        st.success("Subscribed!")
+                    else:
+                        st.error("Could not subscribe, please try again.")
+                else:
+                    _local_path = str(_ROOT / "data" / "email_subscribers.json")
+                    if save_email_locally(_tax_email.strip(), _local_path):
+                        st.success("Thanks! We'll keep you posted.")
+                    else:
+                        st.error("Could not save, please try again.")
+        else:
+            st.info(f"No transactions found for {_tax_year}.")
+
 st.divider()
 with st.expander(
     "Transaction Details",
@@ -331,6 +574,18 @@ with st.expander(
         },
     )
 
+    # Download categorized transactions CSV
+    _txn_export = df[["transaction_date", "description", "amount", "category", "ai_confidence_score"]].copy()
+    _txn_export.columns = ["Date", "Description", "Amount", "Category", "Confidence"]
+    _txn_csv = _txn_export.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download categorized transactions (CSV)",
+        data=_txn_csv,
+        file_name="fin_flow_transactions.csv",
+        mime="text/csv",
+        key="txn_csv_dl",
+    )
+
 st.divider()
 st.subheader("Ask Fin-Flow")
 
@@ -352,6 +607,8 @@ if prompt:
         transactions=df,
         starting_balance=starting_balance,
     )
+
+    log_event("chat_question", intent=answer.intent, backend=answer.backend)
 
     # One-time fallback note on the first rules response
     answer_text = answer.answer

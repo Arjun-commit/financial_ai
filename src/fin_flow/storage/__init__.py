@@ -1,4 +1,4 @@
-"""Storage layer — vector memory and (future) relational client."""
+"""Storage layer - vector memory and (future) relational client."""
 
 from .embeddings import (
     HashingEmbedder,
