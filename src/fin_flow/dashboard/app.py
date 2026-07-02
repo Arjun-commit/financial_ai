@@ -60,6 +60,27 @@ with st.sidebar:
         type=["csv", "xlsx", "xls", "json", "pdf"],
         accept_multiple_files=True,
     )
+    st.caption(
+        "Your files are processed in your session only. "
+        "We never store your transactions or financial data. "
+        "Closing this tab deletes everything."
+    )
+
+    if st.session_state.transactions.empty:
+        if st.button("Try with sample data", use_container_width=True):
+            sample_path = _ROOT / "data" / "samples" / "chase_sample.csv"
+            if sample_path.exists():
+                sample_df = load_file(sample_path, source="chase_sample.csv")
+                cat = CategorizerAgent(prefer_llm=True)
+                classified = cat.classify_dataframe(sample_df)
+                st.session_state.transactions = classified
+                fc_agent = ForecasterAgent(prefer_prophet=False)
+                st.session_state.forecast = fc_agent.forecast(
+                    classified,
+                    starting_balance=st.session_state.starting_balance,
+                    horizon_days=90,
+                )
+                st.rerun()
 
     starting_balance = st.number_input(
         "Starting cash balance ($)",
